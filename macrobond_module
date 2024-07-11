@@ -1,0 +1,174 @@
+# Import modules
+import pandas as pd
+import win32com.client
+from macrobond_api_constants import SeriesFrequency as f
+from macrobond_api_constants import SeriesToLowerFrequencyMethod as tl
+import warnings
+warnings.filterwarnings('ignore') # Ignore warning messages
+import numpy as np
+import matplotlib.pyplot as plt
+
+
+def macrobond_daily(series_list):
+    
+    ## Macrobond api setup
+    def toPandasSeries(series):
+        pdates = pd.to_datetime([d.strftime('%Y-%m-%d') for d in series.DatesAtEndOfPeriod])
+        return pd.Series(series.values, index=pdates)
+    
+    def getDataframe(db, unifiedSeriesRequest):
+        series = db.FetchSeries(unifiedSeriesRequest)
+        return pd.DataFrame({s.Name: toPandasSeries(s) for s in series})
+    
+    c = win32com.client.Dispatch("Macrobond.Connection")
+    d = c.Database
+    r = d.CreateUnifiedSeriesRequest()
+    
+    # Import all macrobond series required
+    for i in range(len(series_list)):
+        r.AddSeries(series_list[i]).ToLowerFrequencyMethod = tl.LAST
+        r.Frequency = f.DAILY
+    
+    frames = getDataframe(d, r)
+    return(frames)
+
+def macrobond_weekly(series_list):
+    
+    ## Macrobond api setup
+    def toPandasSeries(series):
+        pdates = pd.to_datetime([d.strftime('%Y-%m-%d') for d in series.DatesAtEndOfPeriod])
+        return pd.Series(series.values, index=pdates)
+    
+    def getDataframe(db, unifiedSeriesRequest):
+        series = db.FetchSeries(unifiedSeriesRequest)
+        return pd.DataFrame({s.Name: toPandasSeries(s) for s in series})
+    
+    c = win32com.client.Dispatch("Macrobond.Connection")
+    d = c.Database
+    r = d.CreateUnifiedSeriesRequest()
+    
+    # Import all macrobond series required
+    for i in range(len(series_list)):
+        r.AddSeries(series_list[i]).ToLowerFrequencyMethod = tl.LAST
+        r.Frequency = f.WEEKLY
+    
+    frames = getDataframe(d, r)
+    frames = pd.DataFrame(frames.dropna()) ## Downloaded G10 government bond yields with a monthly frequency
+    return(frames)
+
+def macrobond_monthly(series_list):
+    
+    ## Macrobond api setup
+    def toPandasSeries(series):
+        pdates = pd.to_datetime([d.strftime('%Y-%m-%d') for d in series.DatesAtEndOfPeriod])
+        return pd.Series(series.values, index=pdates)
+    
+    def getDataframe(db, unifiedSeriesRequest):
+        series = db.FetchSeries(unifiedSeriesRequest)
+        return pd.DataFrame({s.Name: toPandasSeries(s) for s in series})
+    
+    c = win32com.client.Dispatch("Macrobond.Connection")
+    d = c.Database
+    r = d.CreateUnifiedSeriesRequest()
+    
+    # Import all macrobond series required
+    for i in range(len(series_list)):
+        r.AddSeries(series_list[i]).ToLowerFrequencyMethod = tl.LAST
+        r.Frequency = f.MONTHLY
+    
+    frames = getDataframe(d, r)
+    frames = pd.DataFrame(frames) ## Downloaded G10 government bond yields with a monthly frequency
+    return(frames)
+
+def macrobond_quarterly(series_list):
+    
+    ## Macrobond api setup
+    def toPandasSeries(series):
+        pdates = pd.to_datetime([d.strftime('%Y-%m-%d') for d in series.DatesAtEndOfPeriod])
+        return pd.Series(series.values, index=pdates)
+    
+    def getDataframe(db, unifiedSeriesRequest):
+        series = db.FetchSeries(unifiedSeriesRequest)
+        return pd.DataFrame({s.Name: toPandasSeries(s) for s in series})
+    
+    c = win32com.client.Dispatch("Macrobond.Connection")
+    d = c.Database
+    r = d.CreateUnifiedSeriesRequest()
+    
+    # Import all macrobond series required
+    for i in range(len(series_list)):
+        r.AddSeries(series_list[i]).ToLowerFrequencyMethod = tl.LAST
+        r.Frequency = f.QUARTERLY
+    
+    frames = getDataframe(d, r)
+    return(frames)
+
+
+def macrobond_annual(series_list):
+    
+    ## Macrobond api setup
+    def toPandasSeries(series):
+        pdates = pd.to_datetime([d.strftime('%Y-%m-%d') for d in series.DatesAtEndOfPeriod])
+        return pd.Series(series.values, index=pdates)
+    
+    def getDataframe(db, unifiedSeriesRequest):
+        series = db.FetchSeries(unifiedSeriesRequest)
+        return pd.DataFrame({s.Name: toPandasSeries(s) for s in series})
+    
+    c = win32com.client.Dispatch("Macrobond.Connection")
+    d = c.Database
+    r = d.CreateUnifiedSeriesRequest()
+    
+    # Import all macrobond series required
+    for i in range(len(series_list)):
+        r.AddSeries(series_list[i]).ToLowerFrequencyMethod = tl.LAST
+        r.Frequency = f.ANNUAL
+    
+    frames = getDataframe(d, r)
+    return(frames)
+
+def macrobond_excel(path, column_labels, sheet):
+    df = pd.read_excel(path, sheet_name = sheet)
+    df.index = df.iloc[:,0]
+    df = df.iloc[3:,1:]
+    df.columns = column_labels
+    return(df)
+    
+
+# Define a function that outputs the return chart
+
+def factor_chart(df, chart = False, title = 'factor'): 
+    
+    fig,(ax1,ax2) = plt.subplots(nrows=1,ncols=2)
+
+    plt.subplots_adjust(left=0, right=1.5)
+    plt.subplots_adjust(bottom=0, top=0.75)
+
+    ax1.plot(df['cum_return'])
+    ax1.set_title('Cumulative return of long-short portfolio')
+    
+    
+    ax2.plot(df['cum_return_overweight'], label='Overweight')
+    ax2.plot(df['cum_return_underweight'], label='Underweight')
+    ax2.set_title('Cumulative return of long-long portfolio')
+    ax2.legend()
+
+    if chart:
+        plt.savefig(f'{title.capitalize()}.png',bbox_inches ='tight')
+        
+    fig.suptitle(title, fontsize=16)
+
+    plt.show()
+
+def get_hurst_exponent(time_series, max_lag=20):
+    """Returns the Hurst Exponent of the time series"""
+    
+    lags = range(2, max_lag)
+
+    # variances of the lagged differences
+    tau = [np.std(np.subtract(time_series[lag:], time_series[:-lag])) for lag in lags]
+
+    # calculate the slope of the log plot -> the Hurst Exponent
+    reg = np.polyfit(np.log(lags), np.log(tau), 1)
+
+    return reg[0]
