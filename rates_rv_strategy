@@ -1,0 +1,185 @@
+import pandas as pd
+import warnings
+warnings.filterwarnings('ignore') # Ignore warning messages
+import macrobond_module as md # Self built module imported
+from statsmodels.tsa.stattools import adfuller
+
+# Import central bank base rate data and convert to overnight rates
+base = md.macrobond_daily(['usrate0190','gbrate0001','eurate0003'])
+base.columns = ['fed','boe','ecb']
+base['boe'] = base['boe']-0.15
+base['ecb'] = base['ecb']-0.1
+
+# Import and clean meeting day swap rates data from Excel
+def import_clean_df():
+    df = pd.read_excel('Z:/Global strategy team/Personal/Ryan/Publications/ecb cuts more than fed/meeting_day_swaps.xlsx', index_col=0)
+    df = df.iloc[3:, :]
+    df.columns = [f'boe{i}' for i in range(1,11)] + [f'fed{i}' for i in range(1,11)] + [f'ecb{i}' for i in range(1,11)]
+    df = df.dropna().astype(float)
+    df = df.drop(['boe1','fed1','ecb1','fed10','fed9','ecb10','ecb9','boe10','boe9'], axis=1)
+    return df
+
+# Either import meeting day swap rates or import futures prices                                                                                     
+def rate_trajectory(): # Calculate market pricing of rate change
+    df = import_clean_df()
+    # df = md.macrobond_daily(return_only_valid(mb))
+    # df.columns = lab
+    # df = 100-df
+    # Calculate market-implied easing
+    for cb in ['fed','boe','ecb']:
+        df[df.columns[df.columns.str.contains(cb)]] = subtract(df[df.columns[df.columns.str.contains(cb)]], base, cb)
+    return df
+  
+
+def spread():  # Calculate spread of pricing trajectory between cbs/tenors
+    df = rate_trajectory()
+    col_pairs = [(cb1, cb2) for i, cb1 in enumerate(df.columns) for cb2 in df.columns[i+1:]]
+
+    df_mapped = pd.DataFrame(index=df.index)
+
+    for cb1, cb2 in col_pairs:
+        if cb1[:3] == cb2[:3]:
+            continue
+        
+        df_mapped[f'{cb1}{cb2}'] = df[cb1] - df[cb2]
+        df_mapped[f'{cb2}{cb1}'] = df[cb2] - df[cb1]
+
+    return df_mapped
+
+def zscore(df):
+    mean = df.mean()
+    std = df.std()
+    z = (df-mean) / std
+    return z
+
+def generate_signals(): # if zscore <x / >x then spread expected to tighten/widen
+    df = spread()
+    
+    df_lead = df.diff(1).shift(-1)
+    dates = pd.to_datetime(df.loc['2024-05-01':].index)
+    strategy = pd.DataFrame(index=dates, columns=['pair','long_change', 'score'])
+    z = pd.DataFrame(index=dates, columns = df.columns)
+    
+    # before = pd.to_datetime(df.loc[:'2023-06-01'].index)
+    # after = pd.to_datetime(df.loc['2023-06-01':].index)
+
+    for date in dates:
+        print(date)
+        date_prev = date - pd.DateOffset(months=12) # trailing 12 months
+        temp = df.loc[date_prev:date].dropna(axis=1)
+        
+        # Check stationarity and filter columns
+        # Grab only the spreads that are stationary
+        stationary_cols = [pair for pair in temp.columns 
+                           if adfuller(temp[pair].dropna(), autolag='AIC')[1] < 0.1]
+        
+        temp = temp[stationary_cols]
+        
+        if temp.empty:
+            continue
+        
+        
+        # only trade if the spread is stationary
+        stationary = pd.DataFrame(columns = temp.columns)
+        stationary.loc[date] = 0
+        
+        for pair in temp.columns:
+            if adfuller(temp[pair].dropna(), autolag='AIC')[1] < 0.1:
+                stationary[pair] = True
+            else:
+                stationary[pair] = False
+                
+                
+            
+        temp = temp.loc[:, stationary.loc[date].astype(bool)] # filter out if non-stationary
+        
+        s = zscore(temp).loc[date]
+        
+        long = s.idxmin()
+        strategy.loc[date, ['pair','score']] = long, s.min()
+        # if abs(s.min()) < 2:
+        #     strategy.loc[date,'long_change'] = 0
+        #     continue
+        
+        long_change=df_lead.loc[date, long]
+        
+        z.loc[date]=s
+        
+        if date in dates[:-1]:
+            strategy.loc[date,['long_change']] = long_change
+            
+    return strategy
+    
+# From macrobond only return the tickers that contain data    
+def return_only_valid(series_list):
+    valid_list = []
+    ## Macrobond api setup
+    # Import all macrobond series required
+    for series in series_list:
+        try:
+            md.macrobond_daily([series])
+            valid_list.append(series)
+        except:
+            continue
+            
+    return valid_list
+
+# Calculate spreads efficiently
+def subtract(left, right, col):
+    left = left.join(right[col])
+    left = left.subtract(right[col],axis=0)
+    left = left.drop(col, axis=1)
+    
+    return left
+    
+ry5 = generate_signals()
+
+
+
+# Do exactly the same with futures
+codes  = ['f','g','h','j','k','m','n','q','u','v','x','z']
+years = ['2023','2024','2025']
+tickers = ['sr1','eon','soa']
+mb = []
+lab = []
+
+tick_map = {
+    "f": "jan",
+    "g": "feb",
+    "h": "mar",
+    "j": "apr",
+    "k": "may",
+    "m": "jun",
+    "n": "jul",
+    "q": "aug",
+    "u": "sep",
+    "v": "oct",
+    "x": "nov",
+    "z": "dec",
+    "sr1":"fed",
+    "eon":"ecb",
+    "soa":"boe",
+    "2020":"20",
+    "2021":"21",
+    "2022":"22",
+    "2023":"23",
+    "2024":"24",
+    "2025":"25"
+}
+
+for code in codes:
+    for year in years:
+        for tick in tickers:
+            try:
+                md.macrobond_daily([tick + year + code + '_cl'])
+                mb = mb + [tick + year + code + '_cl']
+                lab = lab + [tick_map[tick]+tick_map[code]+tick_map[year]]
+            except Exception as e:
+                print([tick_map[tick]+tick_map[code]+tick_map[year]], "this ticker does not exist")
+            
+            
+            
+        
+df = md.macrobond_daily(return_only_valid(mb))
+df.columns = lab
+df = 100-df
